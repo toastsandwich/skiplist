@@ -63,7 +63,7 @@ A skip list is a layered linked list that allows fast search by "skipping" over 
 ### Structure
 
 ```
-Level 3:  HEAD --------------------------------------0--------> NIL
+Level 3:  HEAD -----------------------------------------------> NIL
 Level 2:  HEAD --------------------> [30] --------------------> NIL
 Level 1:  HEAD --> [10] -----------> [30] -----------> [50] --> NIL
 Level 0:  HEAD --> [10] --> [20] --> [30] --> [40] --> [50] --> NIL
