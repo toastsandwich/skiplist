@@ -319,6 +319,45 @@ func TestMaxLen(t *testing.T) {
 	}
 }
 
+func TestMaxEntriesAndMaxLevelFor(t *testing.T) {
+	cases := []struct {
+		maxLevel int
+		p        float64
+		want     int64
+	}{
+		{1, 0.5, 2},
+		{10, 0.5, 1024},
+		{16, 0.5, 65536},
+		{32, 0.5, 1 << 32}, // 2^32
+	}
+	for _, tc := range cases {
+		got := MaxEntries(tc.maxLevel, tc.p)
+		if tc.maxLevel < 32 && got != tc.want {
+			t.Errorf("MaxEntries(%d, %g) = %d, want %d", tc.maxLevel, tc.p, got, tc.want)
+		}
+		if MaxLevelFor(got, tc.p) != tc.maxLevel {
+			t.Errorf("MaxLevelFor(MaxEntries(%d, %g), %g) = %d, want %d",
+				tc.maxLevel, tc.p, tc.p, MaxLevelFor(got, tc.p), tc.maxLevel)
+		}
+	}
+
+	if MaxLevelFor(1000, 0.5) != 10 {
+		t.Errorf("MaxLevelFor(1000, 0.5) = %d, want 10", MaxLevelFor(1000, 0.5))
+	}
+}
+
+func TestCapacity(t *testing.T) {
+	s := NewSkipList(16, 0.5)
+	if s.Cap() != MaxEntries(16, 0.5) {
+		t.Errorf("Capacity() = %d, want %d", s.Cap(), MaxEntries(16, 0.5))
+	}
+
+	s.MaxLen = 100
+	if s.Cap() != 100 {
+		t.Errorf("Capacity() with MaxLen = %d, want 100", s.Cap())
+	}
+}
+
 func TestLen(t *testing.T) {
 	t.Run("NewListIsZero", func(t *testing.T) {
 		s := NewSkipList(16, 0.5)

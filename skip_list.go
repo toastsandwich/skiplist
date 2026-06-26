@@ -14,21 +14,53 @@ import (
 	"bytes"
 	"errors"
 	"iter"
+	"math"
 	"math/bits"
 	"math/rand/v2"
 	"sync"
 )
 
 var (
-	ErrNilKey        = errors.New("key cannot be nil or zero len slice of byte")
-	ErrNilVal        = errors.New("value cannot be nil or zero len slice of byte")
-	ErrKeyNotFound   = errors.New("key not found")
-	ErrSkiplistFull  = errors.New("skip list is full")
+	ErrNilKey       = errors.New("key cannot be nil or zero len slice of byte")
+	ErrNilVal       = errors.New("value cannot be nil or zero len slice of byte")
+	ErrKeyNotFound  = errors.New("key not found")
+	ErrSkiplistFull = errors.New("skip list is full")
 )
 
 // DefaultValues returns the default max level (32) and probability (0.5).
 func DefaultValues() (int, float64) {
 	return 32, 0.5
+}
+
+// MaxEntries returns how many entries maxLevel and p can hold: (1/p)^maxLevel.
+// For p=0.5 and maxLevel=32 this is 2^32.
+func MaxEntries(maxLevel int, p float64) int64 {
+	if maxLevel <= 0 || p <= 0 || p >= 1 {
+		return 0
+	}
+	if p == 0.5 {
+		if maxLevel >= 63 {
+			return math.MaxInt64
+		}
+		return int64(1) << maxLevel
+	}
+	v := math.Pow(1/p, float64(maxLevel))
+	if v > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(math.Round(v))
+}
+
+// MaxLevelFor returns the minimum max level needed for n entries at probability p:
+// ceil(log_{1/p}(n)).
+func MaxLevelFor(n int64, p float64) int {
+	if n <= 1 {
+		return 1
+	}
+	if p <= 0 || p >= 1 {
+		return 32
+	}
+	return int(math.Ceil(math.Log(float64(n)) / math.Log(1/p)))
 }
 
 // Element is one node in the list. Most callers use Put instead.
@@ -81,7 +113,8 @@ type SkipList struct {
 	P        float64
 
 	// MaxLen is the max number of entries. 0 means unlimited.
-	MaxLen int
+	// Theoretical max at current MaxLevel and P is MaxEntries(MaxLevel, P).
+	MaxLen int64
 
 	nilElement *Element
 	len        int
@@ -161,7 +194,7 @@ func (s *SkipList) Put(key, val []byte) error {
 		x.Value = val
 		return nil
 	}
-	if s.MaxLen > 0 && s.len >= s.MaxLen {
+	if s.MaxLen > 0 && int64(s.len) >= s.MaxLen {
 		return ErrSkiplistFull
 	}
 	lvl := s.randomLevel()
@@ -230,6 +263,15 @@ func (s *SkipList) ForEach(do func(key, value []byte) bool) {
 // Len returns the number of entries.
 func (s *SkipList) Len() int {
 	return s.len
+}
+
+// Capacity returns the enforced entry limit when MaxLen is set.
+// When MaxLen is 0 (unlimited), returns MaxEntries(MaxLevel, P).
+func (s *SkipList) Cap() int64 {
+	if s.MaxLen > 0 {
+		return s.MaxLen
+	}
+	return MaxEntries(s.MaxLevel, s.P)
 }
 
 func (s *SkipList) randomLevel() int {
