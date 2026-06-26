@@ -15,17 +15,57 @@ go get github.com/toastsandwich/skiplist
 ```go
 import "github.com/toastsandwich/skiplist"
 
-s := skiplist.NewSkipList(32, 0.5)
+s := skiplist.NewSkipList(0, 0) // defaults: max level 32, p 0.5
 
-s.Put([]byte("user:1"), []byte("Alice"))
-val, _ := s.Get([]byte("user:1"))
-
-for k, v := range s.All() {
-	// sorted order
+if err := s.Put([]byte("user:1"), []byte("Alice")); err != nil {
+    // handle ErrNilKey, ErrNilVal, or ErrSkiplistFull
 }
 
-s.Pop([]byte("user:1"))
+val, err := s.Get([]byte("user:1"))
+if err == skiplist.ErrKeyNotFound {
+    // missing key
+}
+
+for k, v := range s.All() {
+    // sorted order
+}
+
+s.ForEach(func(k, v []byte) bool {
+    return true // return false to stop early
+})
+
+if err := s.Pop([]byte("user:1")); err != nil {
+    // handle ErrKeyNotFound or ErrNilKey
+}
+
+n := s.Len() // O(1) entry count
 ```
+
+Pass `0` for either `NewSkipList` argument to use defaults. `DefaultValues()` returns those defaults explicitly: `(32, 0.5)`.
+
+### Optional size limit
+
+Set `MaxLen` on the list to cap how many distinct keys it holds. `0` means unlimited. Updates to existing keys still succeed when full; only new inserts return `ErrSkiplistFull`.
+
+```go
+s := skiplist.NewSkipList(32, 0.5)
+s.MaxLen = 1000
+```
+
+## API
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `Put(key, val)` | `error` | Insert or update |
+| `Get(key)` | `([]byte, error)` | Zero allocs on hit |
+| `Pop(key)` | `error` | Remove by key |
+| `All()` | `iter.Seq2[[]byte, []byte]` | Sorted iteration via `range` |
+| `ForEach(fn)` | — | Callback iteration; return `false` to stop |
+| `Len()` | `int` | Current entry count |
+
+Exported errors: `ErrNilKey`, `ErrNilVal`, `ErrKeyNotFound`, `ErrSkiplistFull`.
+
+Not safe for concurrent use.
 
 ## How Skip Lists Work
 
