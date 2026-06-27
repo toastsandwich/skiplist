@@ -152,6 +152,16 @@ Notes for both:
 
 `Get` has zero allocations on hits for both types.
 
+### Charts
+
+Three-way comparison of concurrent skip list implementations on Apple M2 (`benchtime=1s`, `count=3`). All use `[]byte` keys (`key-NNNNNNNN`). MauriceGit is wrapped with `sync.RWMutex`; fast-skiplist uses its built-in mutex.
+
+![Concurrent skip list comparison](charts/chart_concurrent_three_way.png)
+
+Head-to-head under parallel load: 100K preloaded keys (read-only) and 10K keys with mixed 33% Put / 33% Get / 33% Delete+reinsert.
+
+![MauriceGit vs SyncSkipList parallel ops](charts/chart_maurice_vs_sync_parallel.png)
+
 ## License
 
 MIT
