@@ -450,6 +450,70 @@ func TestLen(t *testing.T) {
 	})
 }
 
+func TestActiveLevel(t *testing.T) {
+	t.Run("EmptyIsNegativeOne", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if s.level != -1 {
+			t.Fatalf("level = %d, want -1", s.level)
+		}
+	})
+
+	t.Run("RaisesOnInsert", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		if err := s.Put([]byte("a"), []byte("1")); err != nil {
+			t.Fatal(err)
+		}
+		if s.level < 0 {
+			t.Fatalf("level = %d after insert, want >= 0", s.level)
+		}
+	})
+
+	t.Run("BackToNegativeOneWhenEmpty", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		_ = s.Put([]byte("a"), []byte("1"))
+		if err := s.Pop([]byte("a")); err != nil {
+			t.Fatal(err)
+		}
+		if s.level != -1 {
+			t.Fatalf("level = %d after last pop, want -1", s.level)
+		}
+	})
+
+	t.Run("LowersWhenTopTowerRemoved", func(t *testing.T) {
+		s := NewSkipList(16, 0.5)
+		insertAtLevel(s, []byte("low"), []byte("1"), 0)
+		insertAtLevel(s, []byte("high"), []byte("2"), 4)
+		if s.level != 4 {
+			t.Fatalf("level = %d, want 4", s.level)
+		}
+		if err := s.Pop([]byte("high")); err != nil {
+			t.Fatal(err)
+		}
+		if s.level != 0 {
+			t.Fatalf("level = %d after popping top, want 0", s.level)
+		}
+		if _, err := s.Get([]byte("low")); err != nil {
+			t.Fatalf("low missing after pop high: %v", err)
+		}
+	})
+}
+
+func insertAtLevel(s *SkipList, key, val []byte, lvl int) {
+	update := make([]*Element, s.MaxLevel)
+	top := s.topLevel(lvl)
+	s.fillUpdate(update, key, top)
+
+	e := s.NewElement(key, val, lvl)
+	for i := 0; i <= lvl; i++ {
+		e.nexts[i] = update[i].nexts[i]
+		update[i].nexts[i] = e
+	}
+	if lvl > s.level {
+		s.level = lvl
+	}
+	s.len++
+}
+
 // Benchmarks
 
 func BenchmarkSkipList_Push(b *testing.B) {

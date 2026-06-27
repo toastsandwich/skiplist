@@ -1,13 +1,19 @@
 // Package skiplist is a sorted []byte key/value store.
 //
 // Put, Get, and Pop are O(log n) on average. Keys sort with bytes.Compare.
-// Not safe for concurrent use.
+//
+// Use SkipList for single-threaded code. Use SyncSkipList when goroutines
+// share the same map.
 //
 //	s := NewSkipList(0, 0) // defaults: max level 32, p 0.5
 //	s.Put([]byte("a"), []byte("1"))
 //	v, _ := s.Get([]byte("a"))
 //	s.Pop([]byte("a"))
 //	for k, v := range s.All() { _ = k; _ = v }
+//
+//	safe := NewSyncSkipList(0, 0)
+//	safe.Put([]byte("a"), []byte("1"))
+//	v, _ = safe.Get([]byte("a"))
 package skiplist
 
 import (
@@ -73,6 +79,29 @@ type Element struct {
 	nextsLen int
 }
 
+func (e *Element) prepare(k, v []byte, lvl int) {
+	e.Key = k
+	e.Value = v
+	e.Level = lvl
+
+	need := lvl + 1
+	if need > cap(e.nexts) {
+		e.nexts = make([]*Element, need)
+	} else {
+		e.nexts = e.nexts[:need]
+		for i := range need {
+			e.nexts[i] = nil
+		}
+	}
+}
+
+func (e *Element) Reset() *Element {
+	e.Key = nil
+	e.Value = nil
+	e.Level = 0
+	return e
+}
+
 // make a header element for skiplist
 func makeHeaderElement(max int) *Element {
 	e := &Element{
@@ -116,6 +145,9 @@ type SkipList struct {
 	// Theoretical max at current MaxLevel and P is MaxEntries(MaxLevel, P).
 	MaxLen int64
 
+	// level is the highest non-empty tower (-1 when empty).
+	level int
+
 	nilElement *Element
 	len        int
 	// used to get update lists
@@ -133,6 +165,8 @@ func NewSkipList(maxlevel int, p float64) *SkipList {
 	return &SkipList{
 		Header:     makeHeaderElement(maxlevel),
 		MaxLevel:   maxlevel,
+		MaxLen:     MaxEntries(maxlevel, p),
+		level:      -1,
 		nilElement: nilElement,
 		P:          p,
 		pool: sync.Pool{
@@ -143,13 +177,35 @@ func NewSkipList(maxlevel int, p float64) *SkipList {
 	}
 }
 
+// topLevel returns the highest level to search, optionally raised by hint.
+func (s *SkipList) topLevel(hint int) int {
+	top := s.level
+	if hint > top {
+		top = hint
+	}
+	if top < 0 {
+		return 0
+	}
+	return top
+}
+
+func (s *SkipList) fillUpdate(update []*Element, key []byte, top int) {
+	x := s.Header
+	for i := top; i >= 0; i-- {
+		for bytes.Compare(x.nexts[i].Key, key) < 0 && x.nexts[i] != s.nilElement {
+			x = x.nexts[i]
+		}
+		update[i] = x
+	}
+}
+
 // Get returns the value for key. ErrKeyNotFound if missing, ErrNilKey if empty.
 func (s *SkipList) Get(key []byte) ([]byte, error) {
 	if len(key) == 0 {
 		return nil, ErrNilKey
 	}
 	h := s.Header
-	for l := s.MaxLevel - 1; l >= 0; l-- {
+	for l := s.topLevel(0); l >= 0; l-- {
 		for bytes.Compare(h.nexts[l].Key, key) < 0 && h.nexts[l] != s.nilElement {
 			h = h.nexts[l]
 		}
@@ -181,15 +237,10 @@ func (s *SkipList) Put(key, val []byte) error {
 	update := s.pool.Get().([]*Element)
 	defer s.pool.Put(update)
 
-	x := s.Header
-	// search for the key
-	for i := s.MaxLevel - 1; i >= 0; i-- {
-		for bytes.Compare(x.nexts[i].Key, key) < 0 && x.nexts[i] != s.nilElement {
-			x = x.nexts[i]
-		}
-		update[i] = x
-	}
-	x = x.nexts[0]
+	searchTop := s.topLevel(0)
+	s.fillUpdate(update, key, searchTop)
+
+	x := update[0].nexts[0]
 	if bytes.Equal(x.Key, key) {
 		x.Value = val
 		return nil
@@ -198,10 +249,16 @@ func (s *SkipList) Put(key, val []byte) error {
 		return ErrSkiplistFull
 	}
 	lvl := s.randomLevel()
+	if lvl > searchTop {
+		s.fillUpdate(update, key, lvl)
+	}
 	x = s.NewElement(key, val, lvl)
 	for i := 0; i <= lvl; i++ {
 		x.nexts[i] = update[i].nexts[i]
 		update[i].nexts[i] = x
+	}
+	if lvl > s.level {
+		s.level = lvl
 	}
 	s.len++
 	return nil
@@ -215,24 +272,26 @@ func (s *SkipList) Pop(key []byte) error {
 	update := s.pool.Get().([]*Element)
 	defer s.pool.Put(update)
 
-	x := s.Header
-	// search for the key
-	for i := s.MaxLevel - 1; i >= 0; i-- {
-		for bytes.Compare(x.nexts[i].Key, key) < 0 && x.nexts[i] != s.nilElement {
-			x = x.nexts[i]
-		}
-		update[i] = x
-	}
-	x = x.nexts[0]
+	s.fillUpdate(update, key, s.topLevel(0))
+
+	x := update[0].nexts[0]
 	if x == s.nilElement || !bytes.Equal(x.Key, key) {
 		return ErrKeyNotFound
 	}
+
+	removedLevel := x.Level
 
 	// Unlink the node from all the levels it participates in.
 	// A node with Level=l only has forward pointers (and is linked) at levels 0..l.
 	for i := 0; i <= x.Level && i < s.MaxLevel; i++ {
 		if update[i].nexts[i] == x {
 			update[i].nexts[i] = x.nexts[i]
+		}
+	}
+
+	if removedLevel == s.level {
+		for s.level >= 0 && s.Header.nexts[s.level] == s.nilElement {
+			s.level--
 		}
 	}
 

@@ -67,6 +67,44 @@ Exported errors: `ErrNilKey`, `ErrNilVal`, `ErrKeyNotFound`, `ErrSkiplistFull`.
 
 Not safe for concurrent use.
 
+## SyncSkipList (concurrent)
+
+Use `SyncSkipList` when multiple goroutines hit the same map. It wraps the same logic with an `RWMutex` — many readers, one writer at a time.
+
+```go
+s := skiplist.NewSyncSkipList(0, 0)
+
+if err := s.Put([]byte("user:1"), []byte("Alice")); err != nil {
+    // handle error
+}
+
+val, err := s.Get([]byte("user:1"))
+
+if err := s.Pop([]byte("user:1")); err != nil {
+    // handle error
+}
+
+n := s.Len() // int64
+```
+
+**Ownership:** `Put` takes the key and value slices. Do not reuse or mutate them after the call.
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `Put(key, val)` | `error` | Insert or update; takes slice ownership |
+| `Get(key)` | `([]byte, error)` | Safe concurrent reads; zero allocs on hit |
+| `Pop(key)` | `error` | Remove by key |
+| `Len()` | `int64` | Current entry count |
+| `Cap()` | `int64` | Max entries allowed |
+
+No `All()` or `ForEach()` on `SyncSkipList` yet.
+
+Run sync benchmarks:
+
+```bash
+go test -run=^$ -bench='BenchmarkSyncSkipList' -benchmem -benchtime=1s
+```
+
 ## How Skip Lists Work
 
 A skip list is a sorted linked list with extra "express lane" layers on top.
