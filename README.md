@@ -67,6 +67,38 @@ Exported errors: `ErrNilKey`, `ErrNilVal`, `ErrKeyNotFound`, `ErrSkiplistFull`.
 
 Not safe for concurrent use.
 
+## SyncSkipList (concurrent)
+
+Use `SyncSkipList` when multiple goroutines hit the same map. It wraps the same logic with an `RWMutex` — many readers, one writer at a time.
+
+```go
+s := skiplist.NewSyncSkipList(0, 0)
+
+if err := s.Put([]byte("user:1"), []byte("Alice")); err != nil {
+    // handle error
+}
+
+val, err := s.Get([]byte("user:1"))
+
+if err := s.Pop([]byte("user:1")); err != nil {
+    // handle error
+}
+
+n := s.Len() // int64
+```
+
+**Ownership:** `Put` takes the key and value slices. Do not reuse or mutate them after the call.
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `Put(key, val)` | `error` | Insert or update; takes slice ownership |
+| `Get(key)` | `([]byte, error)` | Safe concurrent reads; zero allocs on hit |
+| `Pop(key)` | `error` | Remove by key |
+| `Len()` | `int64` | Current entry count |
+| `Cap()` | `int64` | Max entries allowed |
+
+No `All()` or `ForEach()` on `SyncSkipList` yet.
+
 ## How Skip Lists Work
 
 A skip list is a sorted linked list with extra "express lane" layers on top.
@@ -87,11 +119,15 @@ Level 0: HEAD --> [10] --> [20] --> [50] --> [80] --> NIL
 
 ## Benchmarks (heavy load)
 
-Run on ~1 million elements (Intel Core i7-11800H):
-
 ```bash
-go test -run=^$ -bench=. -benchmem -count=3 -benchtime=1s
+# SkipList
+go test -run=^$ -bench='BenchmarkSkipList' -benchmem -count=3 -benchtime=1s
+
+# SyncSkipList
+go test -run=^$ -bench='BenchmarkSyncSkipList' -benchmem -count=3 -benchtime=1s
 ```
+
+### SkipList (Intel Core i7-11800H)
 
 | Op            | ns/op  | allocs/op |
 |---------------|--------|-----------|
@@ -99,13 +135,22 @@ go test -run=^$ -bench=. -benchmem -count=3 -benchtime=1s
 | Get           | 244    | 0         |
 | Pop           | 572    | 4         |
 | PutGetMix     | 619    | 3         |
-| Iteration     | 6.3ms  | 0         |
+
+### SyncSkipList (Apple M2)
+
+| Op            | ns/op  | allocs/op |
+|---------------|--------|-----------|
+| Put           | 350    | 2         |
+| Get           | 260    | 0         |
+| Pop           | 625    | 0         |
+| PutGetMix     | 720    | 2         |
+
+Notes for both:
 
 - `Get`, `Pop`, and `PutGetMix` run against a preloaded list of 1M elements.
-- `Iteration` = one full traversal over 500k elements.
 - `Pop` benchmark does pop + re-insert to keep size stable.
 
-`Get` has zero allocations on hits.
+`Get` has zero allocations on hits for both types.
 
 ## License
 
