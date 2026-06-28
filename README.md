@@ -1,4 +1,4 @@
-# go-skiplist
+# skiplist
 
 Simple skip list for Go.
 
